@@ -1,21 +1,43 @@
-# Flutter
+# Flutter & Dart
 **/pubspec.lock
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
+.packages
 build/
+coverage/
+
+# Android
 .gradle/
+*.iml
+local.properties
+*.log
+*.jks
+*.keystore
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.iws
+*.ipr
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Environment
+# Environment & Secrets
 .env
 .env.local
+.env*.local
+key.properties
+
+# Generated
+*.g.dart
+*.config.dart
