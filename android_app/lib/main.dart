@@ -129,7 +129,8 @@ class _WebViewScreenState extends State<WebViewScreen> {
   // 6. Logging untuk debug
   static const String _injectedJs = r"""
 (function() {
-  console.log('[Sekolah App JS] Injection started');
+  try {
+    console.log('[Sekolah App JS] Injection started at URL:', window.location.href);
 
   // 1. Intercept window.open() -- dipakai banyak tombol cetak/PDF
   var _origOpen = window.open;
@@ -224,7 +225,10 @@ class _WebViewScreenState extends State<WebViewScreen> {
     });
   }).observe(document.body, { childList: true, subtree: true });
 
-  console.log('[Sekolah App JS] Injection complete');
+    console.log('[Sekolah App JS] Injection complete');
+  } catch(e) {
+    console.error('[Sekolah App JS] Error during injection:', e.message, e.stack);
+  }
 })();
 """;
 
@@ -253,6 +257,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
             print('[WebView] Page finished loading, injecting JS');
             setState(() => _isLoading = false);
             _controller.runJavaScript(_injectedJs);
+            _controller.runJavaScript('console.log("[WebView] JS injection complete at: " + window.location.href)');
           },
           onNavigationRequest: (request) {
             // Hanya blok navigasi ke domain lain
