@@ -140,7 +140,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
   void _initWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setCacheMode(CacheMode.noCache)
       ..addJavaScriptChannel(
         'FlutterDateTimePicker',
         onMessageReceived: (JavaScriptMessage msg) {
