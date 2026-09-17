@@ -64,7 +64,7 @@ android {
             create(school.id) {
                 dimension "school"
                 applicationId school.applicationId
-                manifestPlaceholders = [appName: school.appName]
+                manifestPlaceholders.put("appName", school.appName)
                 resValue "string", "app_name", school.appName
             }
         }
