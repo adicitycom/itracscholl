@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "401333278296",
+    "project_id": "sekolah-app-itrac",
+    "storage_bucket": "sekolah-app-itrac.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:401333278296:android:c9ce31db6f578b7eee5c2d",
+        "android_client_info": {
+          "package_name": "com.itracscholl.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDUPiSL2T9G_zu5ltBiKKPITI6QoUrn5d0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
