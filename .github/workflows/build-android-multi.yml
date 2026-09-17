@@ -1,0 +1,104 @@
+name: Build Android (Multi-School)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android_app/**'
+      - '.github/workflows/build-android-multi.yml'
+  workflow_dispatch: {}
+
+jobs:
+  # Job 1: baca schools.json, jadikan daftar ID sekolah sebagai matrix
+  # untuk job build di bawah. Ini satu-satunya tempat yang "tahu" berapa
+  # banyak sekolah -- nambah sekolah baru otomatis nambah build job.
+  load-schools:
+    runs-on: ubuntu-latest
+    outputs:
+      schools: ${{ steps.set.outputs.schools }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: set
+        run: |
+          IDS=$(jq -c '[.[].id]' android_app/schools/schools.json)
+          echo "schools=$IDS" >> "$GITHUB_OUTPUT"
+          echo "Sekolah yang akan dibuild: $IDS"
+
+  build:
+    needs: load-schools
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false   # kalau 1 sekolah gagal build, sekolah lain tetap lanjut
+      matrix:
+        school: ${{ fromJson(needs.load-schools.outputs.schools) }}
+    defaults:
+      run:
+        working-directory: android_app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Install ImageMagick (untuk generate icon)
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
+      - name: Generate icon untuk sekolah ini
+        run: bash tool/generate_icons.sh ${{ matrix.school }}
+
+      - name: Decrypt google-services.json untuk sekolah ini
+        run: |
+          mkdir -p "android/app/src/${{ matrix.school }}"
+          openssl enc -d -aes-256-cbc -pbkdf2 \
+            -in "schools/${{ matrix.school }}/google-services.json.enc" \
+            -out "android/app/src/${{ matrix.school }}/google-services.json" \
+            -pass pass:"${{ secrets.SECRETS_PASSPHRASE }}"
+
+      - name: Siapkan keystore (dipakai bersama semua sekolah)
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storeFile=app/upload-keystore.jks
+          EOF
+
+      - name: Ambil dependencies
+        run: flutter pub get
+
+      - name: Build APK (release)
+        run: |
+          flutter build apk --release \
+            --flavor ${{ matrix.school }} \
+            --dart-define=SCHOOL_ID=${{ matrix.school }} \
+            -t lib/main.dart
+
+      - name: Build AAB (release, untuk Play Store)
+        run: |
+          flutter build appbundle --release \
+            --flavor ${{ matrix.school }} \
+            --dart-define=SCHOOL_ID=${{ matrix.school }} \
+            -t lib/main.dart
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.school }}
+          path: android_app/build/app/outputs/flutter-apk/app-${{ matrix.school }}-release.apk
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: aab-${{ matrix.school }}
+          path: android_app/build/app/outputs/bundle/${{ matrix.school }}Release/app-${{ matrix.school }}-release.aab
