@@ -59,8 +59,10 @@ jobs:
       - name: Siapkan google-services.json untuk sekolah ini
         run: |
           mkdir -p "android/app/src/${{ matrix.school }}"
-          cp "schools/${{ matrix.school }}/google-services.json" \
-             "android/app/src/${{ matrix.school }}/google-services.json"
+          openssl enc -d -aes-256-cbc -pbkdf2 \
+            -in "schools/${{ matrix.school }}/google-services.json.enc" \
+            -out "android/app/src/${{ matrix.school }}/google-services.json" \
+            -pass pass:"${{ secrets.SECRETS_PASSPHRASE }}"
 
       - name: Siapkan keystore (dipakai bersama semua sekolah)
         run: |

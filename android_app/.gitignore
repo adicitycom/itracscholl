@@ -41,3 +41,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase config per sekolah -- HANYA versi terenkripsi (.enc) yang boleh
+# di-commit, lihat ADD_NEW_SCHOOL.md
+schools/*/google-services.json
+android/app/upload-keystore.jks
+android/key.properties
