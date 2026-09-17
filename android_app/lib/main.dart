@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -272,6 +274,18 @@ class _WebViewScreenState extends State<WebViewScreen> {
         ),
       )
       ..loadRequest(Uri.parse(widget.school.websiteUrl));
+
+    // Setup Android-specific handler untuk window.open() dari web (tombol cetak, dll)
+    if (Platform.isAndroid) {
+      final androidController = _controller.platform as AndroidWebViewController;
+      androidController.setOnCreateWindow((request) {
+        print('[AndroidWebView.onCreateWindow] New window request: ${request.url}');
+        if (request.url.isNotEmpty) {
+          _openExternal(request.url);
+        }
+        return false;
+      });
+    }
   }
 
   Future<bool> _onWillPop() async {
