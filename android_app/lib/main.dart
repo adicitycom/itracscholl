@@ -69,8 +69,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
     await messaging.getToken();
   }
 
-  // Tampilkan date+time picker Flutter native, lalu kirim hasilnya
-  // ke field HTML yang diminta (fieldName = value attr "name" input).
   Future<void> _showFlutterDatePicker(String fieldName) async {
     final now = DateTime.now();
 
@@ -80,49 +78,77 @@ class _WebViewScreenState extends State<WebViewScreen> {
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 5),
     );
-    if (date == null) return;
+    if (date == null) {
+      // User batal -- reset flag supaya bisa klik lagi
+      await _controller.runJavaScript('window._pickerOpen = false;');
+      return;
+    }
 
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
     );
-    if (time == null) return;
+    if (time == null) {
+      // User batal -- reset flag supaya bisa klik lagi
+      await _controller.runJavaScript('window._pickerOpen = false;');
+      return;
+    }
 
+    // Format YYYY-MM-DDTHH:mm (format datetime-local HTML standard)
     final formatted =
         '${date.year.toString().padLeft(4, '0')}-'
         '${date.month.toString().padLeft(2, '0')}-'
-        '${date.day.toString().padLeft(2, '0')} '
+        '${date.day.toString().padLeft(2, '0')}T'
         '${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}';
 
-    await _controller.runJavaScript(
-      "document.querySelector('[name=\"$fieldName\"]').value = '$formatted';"
-      "document.querySelector('[name=\"$fieldName\"]').dispatchEvent(new Event('change'));",
-    );
+    // Set nilai ke field HTML dan reset flag debounce
+    await _controller.runJavaScript('''
+      (function() {
+        var el = document.querySelector('[name="${fieldName}"]');
+        if (el) {
+          el.value = '${formatted}';
+          el.dispatchEvent(new Event('change'));
+          el.dispatchEvent(new Event('input'));
+        }
+        window._pickerOpen = false;
+      })();
+    ''');
   }
 
-  // JS yang di-inject setelah halaman selesai load:
-  // mengganti semua input datetime dengan Flutter native picker.
+  // JS debounce: pastikan picker hanya terbuka 1x per tap
   static const String _datePickerJs = r"""
 (function() {
+  window._pickerOpen = false;
+
   function attachPicker(el) {
     if (el._flutterPicker) return;
     el._flutterPicker = true;
     el.readOnly = true;
     el.style.caretColor = 'transparent';
+
+    function openPicker() {
+      if (window._pickerOpen) return;
+      window._pickerOpen = true;
+      FlutterDateTimePicker.postMessage(el.name);
+    }
+
     el.addEventListener('click', function(e) {
       e.preventDefault();
       e.stopPropagation();
-      FlutterDateTimePicker.postMessage(el.name);
+      openPicker();
     });
     el.addEventListener('focus', function() {
       el.blur();
-      FlutterDateTimePicker.postMessage(el.name);
+      // Beri jeda kecil supaya tidak bentrok dengan click event
+      setTimeout(openPicker, 100);
     });
   }
+
   document.querySelectorAll(
     'input[type="datetime-local"], input.datetime-picker'
   ).forEach(attachPicker);
+
   new MutationObserver(function(muts) {
     muts.forEach(function(m) {
       m.addedNodes.forEach(function(n) {
