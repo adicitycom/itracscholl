@@ -56,13 +56,11 @@ jobs:
       - name: Generate icon untuk sekolah ini
         run: bash tool/generate_icons.sh ${{ matrix.school }}
 
-      - name: Decrypt google-services.json untuk sekolah ini
+      - name: Siapkan google-services.json untuk sekolah ini
         run: |
           mkdir -p "android/app/src/${{ matrix.school }}"
-          openssl enc -d -aes-256-cbc -pbkdf2 \
-            -in "schools/${{ matrix.school }}/google-services.json.enc" \
-            -out "android/app/src/${{ matrix.school }}/google-services.json" \
-            -pass pass:"${{ secrets.SECRETS_PASSPHRASE }}"
+          cp "schools/${{ matrix.school }}/google-services.json" \
+             "android/app/src/${{ matrix.school }}/google-services.json"
 
       - name: Siapkan keystore (dipakai bersama semua sekolah)
         run: |
