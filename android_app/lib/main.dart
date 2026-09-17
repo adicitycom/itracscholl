@@ -4,6 +4,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
+import 'dart:io';
 import 'school_config.dart';
 
 @pragma('vm:entry-point')
@@ -45,14 +49,60 @@ class WebViewScreen extends StatefulWidget {
 
 class _WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
+  late final Dio _dio;
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
+    _dio = Dio();
     _requestPermissions();
     _setupFcm();
     _initWebView();
+  }
+
+  Future<void> _downloadFile(String urlString) async {
+    try {
+      final uri = Uri.parse(urlString);
+      final filename = uri.pathSegments.last.isNotEmpty
+          ? uri.pathSegments.last
+          : 'download.pdf';
+
+      final tempDir = await getTemporaryDirectory();
+      final filepath = '${tempDir.path}/$filename';
+
+      final options = Options(
+        responseType: ResponseType.bytes,
+        followRedirects: true,
+      );
+
+      final response = await _dio.get(
+        urlString,
+        options: options,
+      );
+
+      if (response.statusCode == 200) {
+        final file = File(filepath);
+        await file.writeAsBytes(response.data);
+
+        final result = await OpenFilex.open(filepath);
+        if (result.type != ResultType.done) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Tidak bisa membuka file: ${result.message}')),
+            );
+          }
+        }
+      } else {
+        throw Exception('Download gagal: HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error download: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _requestPermissions() async {
@@ -117,32 +167,67 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   // JS yang di-inject setelah halaman load:
-  // 1. Intercept window.open() supaya PDF/tab baru dibuka di Chrome
-  // 2. Intercept klik link download
-  // 3. Handle datetime picker
+  // 1. Intercept window.open() untuk semua cetak/PDF
+  // 2. Intercept a[target="_blank"] dan download link
+  // 3. Intercept form[target="_blank"] submit
+  // 4. Handle datetime picker
   static const String _injectedJs = r"""
 (function() {
   // 1. Intercept window.open() -- dipakai banyak tombol cetak/PDF
   var _origOpen = window.open;
   window.open = function(url, target, features) {
     if (url && url !== '' && url !== 'about:blank') {
-      FlutterExternalUrl.postMessage(url);
+      FlutterFileDownloader.postMessage(url);
       return null;
     }
     return _origOpen.call(window, url, target, features);
   };
 
-  // 2. Intercept klik pada link yang punya download attribute
-  //    atau yang URL-nya mengindikasikan file (pdf, xlsx, docx, dll)
+  // 2. Intercept link clicks:
+  //    - a[download] dan file extension (.pdf, .xlsx, .docx)
+  //    - a[target="_blank"] atau a[target="print"]
+  //    - link yang path-nya mengindikasikan cetak (cetak, print, rapor, export, action=export)
   document.addEventListener('click', function(e) {
-    var el = e.target.closest('a[download], a[href$=".pdf"], a[href$=".xlsx"], a[href$=".docx"]');
-    if (el && el.href) {
+    var el = e.target.closest('a');
+    if (!el || !el.href) return;
+
+    var href = el.href.toLowerCase();
+    var isFileLink = el.hasAttribute('download') ||
+                     href.endsWith('.pdf') || href.endsWith('.xlsx') ||
+                     href.endsWith('.docx');
+    var isTargetBlank = el.target === '_blank' || el.target === 'print';
+    var isCetakIndication = /\b(cetak|print|rapor|laporan|export|download)\b/i.test(href) ||
+                            /[?&](action|format|type)=(cetak|print|rapor|export|pdf|xlsx)/i.test(href);
+
+    if (isFileLink || isTargetBlank || isCetakIndication) {
       e.preventDefault();
-      FlutterExternalUrl.postMessage(el.href);
+      e.stopPropagation();
+      FlutterFileDownloader.postMessage(href);
+      return false;
     }
   }, true);
 
-  // 3. DateTime picker (debounced)
+  // 3. Intercept form submit jika target adalah _blank
+  var _origFormSubmit = HTMLFormElement.prototype.submit;
+  HTMLFormElement.prototype.submit = function() {
+    if (this.target === '_blank' || this.target === 'print') {
+      var form = this;
+      var url = form.action || window.location.href;
+      var formData = new FormData(form);
+
+      // POST jadi GET dengan query string (simplification)
+      if (form.method.toUpperCase() === 'POST') {
+        var params = new URLSearchParams(formData);
+        url = url + (url.indexOf('?') !== -1 ? '&' : '?') + params.toString();
+      }
+
+      FlutterFileDownloader.postMessage(url);
+      return;
+    }
+    return _origFormSubmit.call(this);
+  };
+
+  // 4. DateTime picker (debounced)
   window._pickerOpen = false;
   function attachPicker(el) {
     if (el._flutterPicker) return;
@@ -191,6 +276,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
         },
       )
       ..addJavaScriptChannel(
+        'FlutterFileDownloader',
+        onMessageReceived: (JavaScriptMessage msg) {
+          _downloadFile(msg.message);
+        },
+      )
+      ..addJavaScriptChannel(
         'FlutterDateTimePicker',
         onMessageReceived: (JavaScriptMessage msg) {
           _showFlutterDatePicker(msg.message);
@@ -204,13 +295,31 @@ class _WebViewScreenState extends State<WebViewScreen> {
             _controller.runJavaScript(_injectedJs);
           },
           onNavigationRequest: (request) {
-            // Hanya blok navigasi ke domain lain
-            // (link ke domain sendiri tetap dibuka di WebView)
             final uri = Uri.parse(request.url);
-            if (!uri.host.endsWith(widget.school.allowedDomain)) {
+            final host = uri.host;
+            final pathAndQuery = '${uri.path}${uri.query}'.toLowerCase();
+
+            // Blok navigasi ke domain lain
+            if (!host.endsWith(widget.school.allowedDomain)) {
               _openExternal(request.url);
               return NavigationDecision.prevent;
             }
+
+            // Heuristic: jika URL mengindikasikan cetak/export, download instead of navigate
+            const cetakPatterns = [
+              'cetak', 'print', 'rapor', 'laporan', 'export',
+              'download', 'unduh', 'generate', 'format=pdf',
+              'action=export', 'action=cetak', 'type=pdf',
+            ];
+            final shouldDownload = cetakPatterns.any(
+              (pattern) => pathAndQuery.contains(pattern),
+            );
+
+            if (shouldDownload) {
+              _downloadFile(request.url);
+              return NavigationDecision.prevent;
+            }
+
             return NavigationDecision.navigate;
           },
         ),
