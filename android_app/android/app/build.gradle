@@ -20,7 +20,7 @@ def schoolsJsonFile = file("${projectDir}/../../schools/schools.json")
 def schoolsList = new groovy.json.JsonSlurper().parse(schoolsJsonFile)
 
 android {
-    namespace "id.co.sekolahapp.base" // namespace project, BEDA dari applicationId tiap sekolah
+    namespace "id.co.sekolahapp.sekolah_app" // namespace project (harus sama dengan package di MainActivity.kt), BEDA dari applicationId tiap sekolah
     compileSdk 34
     ndkVersion flutter.ndkVersion
 
