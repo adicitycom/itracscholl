@@ -3,6 +3,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'school_config.dart';
 
 @pragma('vm:entry-point')
@@ -69,6 +70,32 @@ class _WebViewScreenState extends State<WebViewScreen> {
     await messaging.getToken();
   }
 
+  // Cek apakah URL ini sebaiknya dibuka di browser eksternal
+  // (PDF, cetak, download, tab baru, dll)
+  bool _shouldOpenExternal(String url) {
+    final uri = Uri.parse(url);
+    final path = uri.path.toLowerCase();
+    final query = uri.query.toLowerCase();
+
+    // URL ke domain lain selalu buka eksternal
+    if (!uri.host.endsWith(widget.school.allowedDomain)) return true;
+
+    // Halaman PDF / cetak di domain sendiri juga buka di browser eksternal
+    // supaya bisa ditampilkan, didownload, dan diprint dengan normal
+    final pdfKeywords = ['cetak', 'print', 'rapor', 'pdf', 'download', 'export'];
+    for (final kw in pdfKeywords) {
+      if (path.contains(kw) || query.contains(kw)) return true;
+    }
+    return false;
+  }
+
+  Future<void> _openExternal(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   Future<void> _showFlutterDatePicker(String fieldName) async {
     final now = DateTime.now();
 
@@ -79,7 +106,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
       lastDate: DateTime(now.year + 5),
     );
     if (date == null) {
-      // User batal -- reset flag supaya bisa klik lagi
       await _controller.runJavaScript('window._pickerOpen = false;');
       return;
     }
@@ -89,12 +115,10 @@ class _WebViewScreenState extends State<WebViewScreen> {
       initialTime: TimeOfDay.now(),
     );
     if (time == null) {
-      // User batal -- reset flag supaya bisa klik lagi
       await _controller.runJavaScript('window._pickerOpen = false;');
       return;
     }
 
-    // Format YYYY-MM-DDTHH:mm (format datetime-local HTML standard)
     final formatted =
         '${date.year.toString().padLeft(4, '0')}-'
         '${date.month.toString().padLeft(2, '0')}-'
@@ -102,7 +126,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
         '${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}';
 
-    // Set nilai ke field HTML dan reset flag debounce
     await _controller.runJavaScript('''
       (function() {
         var el = document.querySelector('[name="${fieldName}"]');
@@ -116,7 +139,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
     ''');
   }
 
-  // JS debounce: pastikan picker hanya terbuka 1x per tap
   static const String _datePickerJs = r"""
 (function() {
   window._pickerOpen = false;
@@ -140,7 +162,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
     });
     el.addEventListener('focus', function() {
       el.blur();
-      // Beri jeda kecil supaya tidak bentrok dengan click event
       setTimeout(openPicker, 100);
     });
   }
@@ -180,11 +201,11 @@ class _WebViewScreenState extends State<WebViewScreen> {
             _controller.runJavaScript(_datePickerJs);
           },
           onNavigationRequest: (request) {
-            final uri = Uri.parse(request.url);
-            if (uri.host.endsWith(widget.school.allowedDomain)) {
-              return NavigationDecision.navigate;
+            if (_shouldOpenExternal(request.url)) {
+              _openExternal(request.url);
+              return NavigationDecision.prevent;
             }
-            return NavigationDecision.prevent;
+            return NavigationDecision.navigate;
           },
         ),
       )
