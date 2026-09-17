@@ -71,13 +71,31 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   Future<void> _openExternal(String url) async {
-    print('[FlutterExternalUrl] Received URL: $url');
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      print('[FlutterExternalUrl] Opening: $url');
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      print('[FlutterExternalUrl] Cannot launch: $url');
+    try {
+      print('[FlutterExternalUrl] ===== START =====');
+      print('[FlutterExternalUrl] Received URL: $url');
+      print('[FlutterExternalUrl] URL length: ${url.length}');
+
+      final uri = Uri.parse(url);
+      print('[FlutterExternalUrl] Parsed URI: ${uri.scheme}://${uri.host}${uri.path}');
+
+      final canLaunch = await canLaunchUrl(uri);
+      print('[FlutterExternalUrl] Can launch URL: $canLaunch');
+
+      if (canLaunch) {
+        print('[FlutterExternalUrl] Launching external app...');
+        final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+        print('[FlutterExternalUrl] Launch result: $launched');
+      } else {
+        print('[FlutterExternalUrl] ERROR: Cannot launch this URL');
+        print('[FlutterExternalUrl] Trying to launch with URL scheme...');
+        final launched = await launchUrl(uri);
+        print('[FlutterExternalUrl] Fallback launch result: $launched');
+      }
+      print('[FlutterExternalUrl] ===== END =====');
+    } catch (e) {
+      print('[FlutterExternalUrl] EXCEPTION: $e');
+      print('[FlutterExternalUrl] Stack: ${StackTrace.current}');
     }
   }
 
