@@ -70,25 +70,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
     await messaging.getToken();
   }
 
-  // Cek apakah URL ini sebaiknya dibuka di browser eksternal
-  // (PDF, cetak, download, tab baru, dll)
-  bool _shouldOpenExternal(String url) {
-    final uri = Uri.parse(url);
-    final path = uri.path.toLowerCase();
-    final query = uri.query.toLowerCase();
-
-    // URL ke domain lain selalu buka eksternal
-    if (!uri.host.endsWith(widget.school.allowedDomain)) return true;
-
-    // Halaman PDF / cetak di domain sendiri juga buka di browser eksternal
-    // supaya bisa ditampilkan, didownload, dan diprint dengan normal
-    final pdfKeywords = ['cetak', 'print', 'rapor', 'pdf', 'download', 'export'];
-    for (final kw in pdfKeywords) {
-      if (path.contains(kw) || query.contains(kw)) return true;
-    }
-    return false;
-  }
-
   Future<void> _openExternal(String url) async {
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
@@ -98,7 +79,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
 
   Future<void> _showFlutterDatePicker(String fieldName) async {
     final now = DateTime.now();
-
     final date = await showDatePicker(
       context: context,
       initialDate: now,
@@ -109,7 +89,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
       await _controller.runJavaScript('window._pickerOpen = false;');
       return;
     }
-
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
@@ -118,14 +97,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
       await _controller.runJavaScript('window._pickerOpen = false;');
       return;
     }
-
     final formatted =
         '${date.year.toString().padLeft(4, '0')}-'
         '${date.month.toString().padLeft(2, '0')}-'
         '${date.day.toString().padLeft(2, '0')}T'
         '${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}';
-
     await _controller.runJavaScript('''
       (function() {
         var el = document.querySelector('[name="${fieldName}"]');
@@ -139,22 +116,44 @@ class _WebViewScreenState extends State<WebViewScreen> {
     ''');
   }
 
-  static const String _datePickerJs = r"""
+  // JS yang di-inject setelah halaman load:
+  // 1. Intercept window.open() supaya PDF/tab baru dibuka di Chrome
+  // 2. Intercept klik link download
+  // 3. Handle datetime picker
+  static const String _injectedJs = r"""
 (function() {
-  window._pickerOpen = false;
+  // 1. Intercept window.open() -- dipakai banyak tombol cetak/PDF
+  var _origOpen = window.open;
+  window.open = function(url, target, features) {
+    if (url && url !== '' && url !== 'about:blank') {
+      FlutterExternalUrl.postMessage(url);
+      return null;
+    }
+    return _origOpen.call(window, url, target, features);
+  };
 
+  // 2. Intercept klik pada link yang punya download attribute
+  //    atau yang URL-nya mengindikasikan file (pdf, xlsx, docx, dll)
+  document.addEventListener('click', function(e) {
+    var el = e.target.closest('a[download], a[href$=".pdf"], a[href$=".xlsx"], a[href$=".docx"]');
+    if (el && el.href) {
+      e.preventDefault();
+      FlutterExternalUrl.postMessage(el.href);
+    }
+  }, true);
+
+  // 3. DateTime picker (debounced)
+  window._pickerOpen = false;
   function attachPicker(el) {
     if (el._flutterPicker) return;
     el._flutterPicker = true;
     el.readOnly = true;
     el.style.caretColor = 'transparent';
-
     function openPicker() {
       if (window._pickerOpen) return;
       window._pickerOpen = true;
       FlutterDateTimePicker.postMessage(el.name);
     }
-
     el.addEventListener('click', function(e) {
       e.preventDefault();
       e.stopPropagation();
@@ -165,11 +164,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
       setTimeout(openPicker, 100);
     });
   }
-
   document.querySelectorAll(
     'input[type="datetime-local"], input.datetime-picker'
   ).forEach(attachPicker);
-
   new MutationObserver(function(muts) {
     muts.forEach(function(m) {
       m.addedNodes.forEach(function(n) {
@@ -188,6 +185,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel(
+        'FlutterExternalUrl',
+        onMessageReceived: (JavaScriptMessage msg) {
+          _openExternal(msg.message);
+        },
+      )
+      ..addJavaScriptChannel(
         'FlutterDateTimePicker',
         onMessageReceived: (JavaScriptMessage msg) {
           _showFlutterDatePicker(msg.message);
@@ -198,10 +201,13 @@ class _WebViewScreenState extends State<WebViewScreen> {
           onPageStarted: (_) => setState(() => _isLoading = true),
           onPageFinished: (_) {
             setState(() => _isLoading = false);
-            _controller.runJavaScript(_datePickerJs);
+            _controller.runJavaScript(_injectedJs);
           },
           onNavigationRequest: (request) {
-            if (_shouldOpenExternal(request.url)) {
+            // Hanya blok navigasi ke domain lain
+            // (link ke domain sendiri tetap dibuka di WebView)
+            final uri = Uri.parse(request.url);
+            if (!uri.host.endsWith(widget.school.allowedDomain)) {
               _openExternal(request.url);
               return NavigationDecision.prevent;
             }
