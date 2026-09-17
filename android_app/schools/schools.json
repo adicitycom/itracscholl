@@ -1,0 +1,10 @@
+[
+  {
+    "id": "itracscholl",
+    "appName": "Itrac School",
+    "applicationId": "com.itracscholl.app",
+    "websiteUrl": "https://yosi.co.id/sekolah/",
+    "allowedDomain": "yosi.co.id",
+    "themeColor": "#1565C0"
+  }
+]
