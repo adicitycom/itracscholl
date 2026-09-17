@@ -6,17 +6,13 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'school_config.dart';
 
 @pragma('vm:entry-point')
-Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
-  // Notifikasi biasa (payload "notification") otomatis ditampilkan sistem.
-}
+Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final school = await loadCurrentSchoolConfig();
-
   await Firebase.initializeApp();
   FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
-
   runApp(SekolahApp(school: school));
 }
 
@@ -70,24 +66,94 @@ class _WebViewScreenState extends State<WebViewScreen> {
   Future<void> _setupFcm() async {
     final messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
-    final token = await messaging.getToken();
-
-    // TODO: kirim `token` + `widget.school.id` ke endpoint PHP sekolah
-    // yang bersangkutan (widget.school.websiteUrl), supaya server tahu
-    // device mana yang harus dikirim notifikasi UNTUK SEKOLAH INI.
-    // Karena satu Firebase project dipakai banyak sekolah, selalu simpan
-    // school_id bersama token di server supaya notifikasi tidak nyasar
-    // ke sekolah lain.
+    await messaging.getToken();
   }
+
+  // Tampilkan date+time picker Flutter native, lalu kirim hasilnya
+  // ke field HTML yang diminta (fieldName = value attr "name" input).
+  Future<void> _showFlutterDatePicker(String fieldName) async {
+    final now = DateTime.now();
+
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+    );
+    if (date == null) return;
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+    if (time == null) return;
+
+    final formatted =
+        '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')} '
+        '${time.hour.toString().padLeft(2, '0')}:'
+        '${time.minute.toString().padLeft(2, '0')}';
+
+    await _controller.runJavaScript(
+      "document.querySelector('[name=\"$fieldName\"]').value = '$formatted';"
+      "document.querySelector('[name=\"$fieldName\"]').dispatchEvent(new Event('change'));",
+    );
+  }
+
+  // JS yang di-inject setelah halaman selesai load:
+  // mengganti semua input datetime dengan Flutter native picker.
+  static const String _datePickerJs = r"""
+(function() {
+  function attachPicker(el) {
+    if (el._flutterPicker) return;
+    el._flutterPicker = true;
+    el.readOnly = true;
+    el.style.caretColor = 'transparent';
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      FlutterDateTimePicker.postMessage(el.name);
+    });
+    el.addEventListener('focus', function() {
+      el.blur();
+      FlutterDateTimePicker.postMessage(el.name);
+    });
+  }
+  document.querySelectorAll(
+    'input[type="datetime-local"], input.datetime-picker'
+  ).forEach(attachPicker);
+  new MutationObserver(function(muts) {
+    muts.forEach(function(m) {
+      m.addedNodes.forEach(function(n) {
+        if (n.querySelectorAll) {
+          n.querySelectorAll(
+            'input[type="datetime-local"], input.datetime-picker'
+          ).forEach(attachPicker);
+        }
+      });
+    });
+  }).observe(document.body, { childList: true, subtree: true });
+})();
+""";
 
   void _initWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setCacheMode(CacheMode.noCache)
+      ..addJavaScriptChannel(
+        'FlutterDateTimePicker',
+        onMessageReceived: (JavaScriptMessage msg) {
+          _showFlutterDatePicker(msg.message);
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) => setState(() => _isLoading = true),
-          onPageFinished: (_) => setState(() => _isLoading = false),
+          onPageFinished: (_) {
+            setState(() => _isLoading = false);
+            _controller.runJavaScript(_datePickerJs);
+          },
           onNavigationRequest: (request) {
             final uri = Uri.parse(request.url);
             if (uri.host.endsWith(widget.school.allowedDomain)) {
@@ -118,7 +184,8 @@ class _WebViewScreenState extends State<WebViewScreen> {
           child: Stack(
             children: [
               WebViewWidget(controller: _controller),
-              if (_isLoading) const Center(child: CircularProgressIndicator()),
+              if (_isLoading)
+                const Center(child: CircularProgressIndicator()),
             ],
           ),
         ),
