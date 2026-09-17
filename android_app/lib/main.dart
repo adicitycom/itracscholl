@@ -146,21 +146,35 @@ class _WebViewScreenState extends State<WebViewScreen> {
   static const String _injectedJs = r"""
 (function() {
   try {
-    console.log('[Sekolah App JS] Injection started at URL:', window.location.href);
+    console.log('[Sekolah App JS] ===== INJECTION START =====');
+    console.log('[Sekolah App JS] URL:', window.location.href);
+    console.log('[Sekolah App JS] FlutterExternalUrl available:', typeof FlutterExternalUrl !== 'undefined');
+    console.log('[Sekolah App JS] FlutterDateTimePicker available:', typeof FlutterDateTimePicker !== 'undefined');
 
     // 1. Intercept window.open() -- dipakai banyak tombol cetak/PDF
     var _origOpen = window.open;
     window.open = function(url, target, features) {
-      console.log('[window.open] Called with URL:', url, 'target:', target);
-      if (url && url.trim() !== '' && url !== 'about:blank') {
-        console.log('[window.open] Forwarding to Flutter:', url);
+      console.log('[window.open] ===== CALLED =====');
+      console.log('[window.open] URL:', url);
+      console.log('[window.open] Target:', target);
+      console.log('[window.open] Type of URL:', typeof url);
+
+      if (url && url.trim && url.trim() !== '' && url !== 'about:blank') {
+        console.log('[window.open] URL valid, forwarding to Flutter');
+        if (typeof FlutterExternalUrl === 'undefined') {
+          console.error('[window.open] ERROR: FlutterExternalUrl channel not available!');
+          return _origOpen.call(window, url, target, features);
+        }
         try {
+          console.log('[window.open] Posting message to Flutter...');
           FlutterExternalUrl.postMessage(url);
+          console.log('[window.open] Message posted successfully');
         } catch(err) {
-          console.error('[window.open] Error posting to Flutter:', err.message);
+          console.error('[window.open] Exception:', err.message, err.stack);
         }
         return null;
       }
+      console.log('[window.open] URL empty or about:blank, using original');
       return _origOpen.call(window, url, target, features);
     };
 
@@ -250,9 +264,14 @@ class _WebViewScreenState extends State<WebViewScreen> {
       });
     }).observe(document.body, { childList: true, subtree: true });
 
-    console.log('[Sekolah App JS] Injection complete - all interceptors ready');
+    console.log('[Sekolah App JS] ===== INJECTION SUCCESS =====');
+    console.log('[Sekolah App JS] All interceptors ready');
+    console.log('[Sekolah App JS] window.open:', typeof window.open);
+    console.log('[Sekolah App JS] Ready to handle: window.open(), form.submit(), link.click()');
   } catch(e) {
-    console.error('[Sekolah App JS] Injection ERROR:', e.message);
+    console.error('[Sekolah App JS] ===== INJECTION FAILED =====');
+    console.error('[Sekolah App JS] Error:', e.message);
+    console.error('[Sekolah App JS] Stack:', e.stack);
   }
 })();
 """;
@@ -278,11 +297,17 @@ class _WebViewScreenState extends State<WebViewScreen> {
             print('[WebView] Page started loading');
             setState(() => _isLoading = true);
           },
-          onPageFinished: (_) {
-            print('[WebView] Page finished loading, injecting JS');
+          onPageFinished: (url) {
+            print('[WebView] ===== PAGE FINISHED =====');
+            print('[WebView] URL: $url');
             setState(() => _isLoading = false);
-            _controller.runJavaScript(_injectedJs);
-            _controller.runJavaScript('console.log("[WebView] JS injection complete at: " + window.location.href)');
+            print('[WebView] Running JS injection...');
+            _controller.runJavaScript(_injectedJs).then((_) {
+              print('[WebView] JS injection executed successfully');
+              _controller.runJavaScript('console.log("[WebView] JS injection confirmed at: " + window.location.href)');
+            }).catchError((e) {
+              print('[WebView] ERROR executing JS injection: $e');
+            });
           },
           onNavigationRequest: (request) {
             // Hanya blok navigasi ke domain lain
