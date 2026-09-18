@@ -347,7 +347,46 @@ class _WebViewScreenState extends State<WebViewScreen> {
             ],
           ),
         ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: () {
+            showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Test PDF Open'),
+                content: TextField(
+                  onChanged: (val) => _testUrl = val,
+                  decoration: const InputDecoration(
+                    hintText: 'Paste PDF URL here',
+                    border: OutlineInputBorder(),
+                  ),
+                  minLines: 3,
+                  maxLines: 5,
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Cancel'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      if (_testUrl.isNotEmpty) {
+                        print('[DEBUG] Testing URL: $_testUrl');
+                        _openExternal(_testUrl);
+                      }
+                    },
+                    child: const Text('Open URL'),
+                  ),
+                ],
+              ),
+            );
+          },
+          tooltip: 'Test URL Launcher (Debug)',
+          child: const Icon(Icons.bug_report),
+        ),
       ),
     );
   }
+
+  late String _testUrl = '';
 }
