@@ -11,7 +11,11 @@ import 'services/download_manager.dart';
 import 'services/cache_manager.dart';
 import 'services/theme_manager.dart';
 import 'services/connectivity_manager.dart';
+import 'services/biometric_auth.dart';
+import 'services/notification_manager.dart';
 import 'dialogs/theme_dialog.dart';
+import 'dialogs/auth_dialog.dart';
+import 'dialogs/notification_dialog.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {}
@@ -95,9 +99,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
   late DownloadManager _downloadManager;
   late CacheManager _cacheManager;
   late ConnectivityManager _connectivityManager;
+  late BiometricAuth _biometricAuth;
+  late NotificationManager _notificationManager;
   late String _testUrl;
   bool _isOnline = true;
   bool _showOfflineIndicator = false;
+  int _unreadNotifications = 0;
 
   @override
   void initState() {
