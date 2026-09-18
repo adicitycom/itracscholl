@@ -8,6 +8,9 @@ import 'school_config.dart';
 import 'services/error_handler.dart';
 import 'services/session_manager.dart';
 import 'services/download_manager.dart';
+import 'services/cache_manager.dart';
+import 'services/theme_manager.dart';
+import 'services/connectivity_manager.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {}
@@ -20,27 +23,65 @@ Future<void> main() async {
   runApp(SekolahApp(school: school));
 }
 
-class SekolahApp extends StatelessWidget {
+class SekolahApp extends StatefulWidget {
   final SchoolConfig school;
   const SekolahApp({super.key, required this.school});
 
   @override
+  State<SekolahApp> createState() => _SekolahAppState();
+}
+
+class _SekolahAppState extends State<SekolahApp> {
+  late ThemeManager _themeManager;
+
+  @override
+  void initState() {
+    super.initState();
+    _initThemeManager();
+  }
+
+  Future<void> _initThemeManager() async {
+    _themeManager = ThemeManager();
+    await _themeManager.initialize();
+    setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: school.appName,
-      theme: ThemeData(
-        colorSchemeSeed: school.themeColor,
-        useMaterial3: true,
-      ),
-      home: WebViewScreen(school: school),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: _themeManager.themeNotifier,
+      builder: (context, mode, _) {
+        final lightTheme = _themeManager.getLightTheme(Color(widget.school.themeColor));
+        final darkTheme = _themeManager.getDarkTheme(Color(widget.school.themeColor));
+
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: widget.school.appName,
+          theme: lightTheme,
+          darkTheme: darkTheme,
+          themeMode: mode == ThemeMode.system
+              ? ThemeMode.system
+              : mode == ThemeMode.dark
+                  ? ThemeMode.dark
+                  : ThemeMode.light,
+          home: WebViewScreen(
+            school: widget.school,
+            themeManager: _themeManager,
+          ),
+        );
+      },
     );
   }
 }
 
 class WebViewScreen extends StatefulWidget {
   final SchoolConfig school;
-  const WebViewScreen({super.key, required this.school});
+  final ThemeManager themeManager;
+  const WebViewScreen({
+    super.key,
+    required this.school,
+    required this.themeManager,
+  });
 
   @override
   State<WebViewScreen> createState() => _WebViewScreenState();
@@ -51,7 +92,11 @@ class _WebViewScreenState extends State<WebViewScreen> {
   bool _isLoading = true;
   late SessionManager _sessionManager;
   late DownloadManager _downloadManager;
+  late CacheManager _cacheManager;
+  late ConnectivityManager _connectivityManager;
   late String _testUrl;
+  bool _isOnline = true;
+  bool _showOfflineIndicator = false;
 
   @override
   void initState() {
@@ -72,7 +117,35 @@ class _WebViewScreenState extends State<WebViewScreen> {
     _downloadManager = DownloadManager();
     await _downloadManager.initialize();
 
+    _cacheManager = CacheManager();
+    await _cacheManager.initialize();
+
+    _connectivityManager = ConnectivityManager();
+    _connectivityManager.onConnectionChanged = _handleConnectionChange;
+    await _connectivityManager.initialize();
+    _isOnline = _connectivityManager.isOnline;
+
     print('[App] Managers initialized');
+  }
+
+  void _handleConnectionChange() {
+    setState(() {
+      _isOnline = _connectivityManager.isOnline;
+      _showOfflineIndicator = _connectivityManager.isOffline;
+    });
+    print('[App] Connection changed: $_isOnline');
+
+    if (!_isOnline) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You are offline. Showing cached content.'),
+            duration: Duration(seconds: 3),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
   }
 
   void _handleSessionWarning() {
@@ -425,6 +498,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
   @override
   void dispose() {
     _sessionManager.dispose();
+    _connectivityManager.dispose();
     super.dispose();
   }
 
