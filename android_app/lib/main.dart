@@ -5,6 +5,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'school_config.dart';
+import 'services/error_handler.dart';
+import 'services/session_manager.dart';
+import 'services/download_manager.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {}
@@ -46,13 +49,82 @@ class WebViewScreen extends StatefulWidget {
 class _WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
+  late SessionManager _sessionManager;
+  late DownloadManager _downloadManager;
+  late String _testUrl;
 
   @override
   void initState() {
     super.initState();
+    _testUrl = '';
+    _initializeManagers();
     _requestPermissions();
     _setupFcm();
     _initWebView();
+  }
+
+  Future<void> _initializeManagers() async {
+    _sessionManager = SessionManager();
+    _sessionManager.onSessionExpired = _handleSessionExpired;
+    _sessionManager.onSessionWarning = _handleSessionWarning;
+    _sessionManager.startSession();
+
+    _downloadManager = DownloadManager();
+    await _downloadManager.initialize();
+
+    print('[App] Managers initialized');
+  }
+
+  void _handleSessionWarning() {
+    print('[App] Session warning - 5 minutes remaining');
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Session Expiring'),
+        content: const Text('Your session will expire in 5 minutes due to inactivity. Click "Continue" to stay logged in.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _sessionManager.recordActivity();
+              print('[App] Session activity recorded from warning');
+            },
+            child: const Text('Continue'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _handleSessionExpired();
+            },
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleSessionExpired() {
+    print('[App] Session expired');
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Session Expired'),
+        content: const Text('Your session has expired due to inactivity. Please refresh or go back to login.'),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _controller.reload();
+            },
+            child: const Text('Refresh'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _requestPermissions() async {
@@ -74,7 +146,8 @@ class _WebViewScreenState extends State<WebViewScreen> {
     try {
       print('[FlutterExternalUrl] ===== START =====');
       print('[FlutterExternalUrl] Received URL: $url');
-      print('[FlutterExternalUrl] URL length: ${url.length}');
+
+      _sessionManager.recordActivity();
 
       final uri = Uri.parse(url);
       print('[FlutterExternalUrl] Parsed URI: ${uri.scheme}://${uri.host}${uri.path}');
@@ -86,16 +159,41 @@ class _WebViewScreenState extends State<WebViewScreen> {
         print('[FlutterExternalUrl] Launching external app...');
         final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
         print('[FlutterExternalUrl] Launch result: $launched');
+
+        if (launched) {
+          final fileName = uri.path.split('/').last;
+          await _downloadManager.addDownload(
+            url: url,
+            fileName: fileName.isEmpty ? 'download' : fileName,
+            schoolId: widget.school.id,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Opening: ${fileName.isEmpty ? 'document' : fileName}'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            AppError.generic('Failed to open document. Try again.').showSnackBar(context);
+          }
+        }
       } else {
         print('[FlutterExternalUrl] ERROR: Cannot launch this URL');
-        print('[FlutterExternalUrl] Trying to launch with URL scheme...');
-        final launched = await launchUrl(uri);
-        print('[FlutterExternalUrl] Fallback launch result: $launched');
+        if (mounted) {
+          AppError.generic('Cannot open this type of file').showSnackBar(context);
+        }
       }
       print('[FlutterExternalUrl] ===== END =====');
-    } catch (e) {
+    } catch (e, st) {
       print('[FlutterExternalUrl] EXCEPTION: $e');
-      print('[FlutterExternalUrl] Stack: ${StackTrace.current}');
+      print('[FlutterExternalUrl] Stack: $st');
+      if (mounted) {
+        final error = ErrorHandler.handleException(e, st);
+        error.showSnackBar(context);
+      }
     }
   }
 
@@ -300,6 +398,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
           onPageFinished: (url) {
             print('[WebView] ===== PAGE FINISHED =====');
             print('[WebView] URL: $url');
+            _sessionManager.recordActivity();
             setState(() => _isLoading = false);
             print('[WebView] Running JS injection...');
             _controller.runJavaScript(_injectedJs).then((_) {
@@ -310,8 +409,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
             });
           },
           onNavigationRequest: (request) {
-            // Hanya blok navigasi ke domain lain
-            // (link ke domain sendiri tetap dibuka di WebView)
+            _sessionManager.recordActivity();
             final uri = Uri.parse(request.url);
             if (!uri.host.endsWith(widget.school.allowedDomain)) {
               _openExternal(request.url);
@@ -322,6 +420,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
         ),
       )
       ..loadRequest(Uri.parse(widget.school.websiteUrl));
+  }
+
+  @override
+  void dispose() {
+    _sessionManager.dispose();
+    super.dispose();
   }
 
   Future<bool> _onWillPop() async {
@@ -347,46 +451,202 @@ class _WebViewScreenState extends State<WebViewScreen> {
             ],
           ),
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: () {
-            showDialog(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Test PDF Open'),
-                content: TextField(
-                  onChanged: (val) => _testUrl = val,
-                  decoration: const InputDecoration(
-                    hintText: 'Paste PDF URL here',
-                    border: OutlineInputBorder(),
-                  ),
-                  minLines: 3,
-                  maxLines: 5,
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Cancel'),
-                  ),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      if (_testUrl.isNotEmpty) {
-                        print('[DEBUG] Testing URL: $_testUrl');
-                        _openExternal(_testUrl);
-                      }
-                    },
-                    child: const Text('Open URL'),
-                  ),
+        floatingActionButton: PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert),
+          tooltip: 'Menu',
+          onSelected: (value) async {
+            switch (value) {
+              case 'debug_test':
+                _showDebugDialog();
+              case 'download_history':
+                _showDownloadHistory();
+              case 'session_info':
+                _showSessionInfo();
+              case 'clear_downloads':
+                await _downloadManager.clearHistory(schoolId: widget.school.id);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Download history cleared')),
+                  );
+                }
+            }
+          },
+          itemBuilder: (BuildContext context) => [
+            const PopupMenuItem<String>(
+              value: 'download_history',
+              child: Row(
+                children: [
+                  Icon(Icons.history, size: 20),
+                  SizedBox(width: 12),
+                  Text('Download History'),
                 ],
               ),
-            );
-          },
-          tooltip: 'Test URL Launcher (Debug)',
-          child: const Icon(Icons.bug_report),
+            ),
+            const PopupMenuItem<String>(
+              value: 'session_info',
+              child: Row(
+                children: [
+                  Icon(Icons.timer, size: 20),
+                  SizedBox(width: 12),
+                  Text('Session Info'),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem<String>(
+              value: 'debug_test',
+              child: Row(
+                children: [
+                  Icon(Icons.bug_report, size: 20),
+                  SizedBox(width: 12),
+                  Text('Test URL Launcher'),
+                ],
+              ),
+            ),
+            const PopupMenuItem<String>(
+              value: 'clear_downloads',
+              child: Row(
+                children: [
+                  Icon(Icons.delete_outline, size: 20),
+                  SizedBox(width: 12),
+                  Text('Clear History'),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  late String _testUrl = '';
+  void _showDebugDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Test URL Launcher'),
+        content: TextField(
+          onChanged: (val) => _testUrl = val,
+          decoration: const InputDecoration(
+            hintText: 'Paste PDF URL here',
+            helperText: 'Example: https://example.com/file.pdf',
+            border: OutlineInputBorder(),
+          ),
+          minLines: 3,
+          maxLines: 5,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (_testUrl.isNotEmpty) {
+                print('[DEBUG] Testing URL: $_testUrl');
+                _openExternal(_testUrl);
+              }
+            },
+            child: const Text('Test'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showDownloadHistory() async {
+    final history = await _downloadManager.getHistory(schoolId: widget.school.id);
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Download History (${history.length})'),
+        content: history.isEmpty
+            ? const Text('No downloads yet')
+            : SizedBox(
+                width: double.maxFinite,
+                child: ListView.separated(
+                  itemCount: history.length,
+                  separatorBuilder: (_, __) => const Divider(),
+                  itemBuilder: (_, idx) {
+                    final record = history[idx];
+                    return ListTile(
+                      leading: const Icon(Icons.file_download, size: 24),
+                      title: Text(
+                        record.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(record.formattedDate, style: const TextStyle(fontSize: 12)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.open_in_new, size: 18),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _openExternal(record.url);
+                        },
+                      ),
+                      onLongPress: () {
+                        _downloadManager.removeDownload(record.id);
+                        Navigator.pop(ctx);
+                        _showDownloadHistory();
+                      },
+                    );
+                  },
+                ),
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSessionInfo() {
+    final timeLeft = _sessionManager.timeUntilTimeout;
+    final isActive = _sessionManager.isSessionActive;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Session Information'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Status: ${isActive ? 'Active' : 'Expired'}'),
+            const SizedBox(height: 8),
+            Text(
+              'Time remaining: ${timeLeft.inMinutes}m ${timeLeft.inSeconds % 60}s',
+              style: TextStyle(
+                color: timeLeft.inMinutes < 5 ? Colors.orange : Colors.green,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text('Timeout: ${SessionManager.SESSION_TIMEOUT.inMinutes} minutes'),
+            const SizedBox(height: 8),
+            const Text('Activity will extend your session'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _sessionManager.recordActivity();
+            },
+            child: const Text('Refresh Activity'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
 }
