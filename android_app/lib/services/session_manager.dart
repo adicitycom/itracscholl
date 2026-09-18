@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 class SessionManager {
   static const Duration SESSION_TIMEOUT = Duration(minutes: 15);
