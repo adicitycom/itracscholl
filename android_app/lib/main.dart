@@ -16,6 +16,10 @@ import 'services/notification_manager.dart';
 import 'dialogs/theme_dialog.dart';
 import 'dialogs/auth_dialog.dart';
 import 'dialogs/notification_dialog.dart';
+import 'services/analytics_manager.dart';
+import 'services/announcement_manager.dart';
+import 'dialogs/analytics_dialog.dart';
+import 'dialogs/announcement_dialog.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {}
@@ -101,6 +105,8 @@ class _WebViewScreenState extends State<WebViewScreen> {
   late ConnectivityManager _connectivityManager;
   late BiometricAuth _biometricAuth;
   late NotificationManager _notificationManager;
+  late AnalyticsManager _analyticsManager;
+  late AnnouncementManager _announcementManager;
   late String _testUrl;
   bool _isOnline = true;
   bool _showOfflineIndicator = false;
@@ -139,6 +145,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
     _notificationManager = NotificationManager();
     _notificationManager.onNotificationReceived = _handleNotificationReceived;
     await _notificationManager.initialize();
+
+    _analyticsManager = AnalyticsManager();
+    await _analyticsManager.initialize();
+
+    _announcementManager = AnnouncementManager();
+    await _announcementManager.initialize();
 
     print('[App] Managers initialized');
   }
@@ -261,6 +273,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
             fileName: fileName.isEmpty ? 'download' : fileName,
             schoolId: widget.school.id,
           );
+          _analyticsManager.trackDownload(fileName.isEmpty ? 'unknown' : fileName);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -493,6 +506,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
             print('[WebView] ===== PAGE FINISHED =====');
             print('[WebView] URL: $url');
             _sessionManager.recordActivity();
+            _analyticsManager.trackPageView(url ?? 'unknown');
             setState(() => _isLoading = false);
             print('[WebView] Running JS injection...');
             _controller.runJavaScript(_injectedJs).then((_) {
@@ -577,6 +591,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
           icon: const Icon(Icons.more_vert),
           tooltip: 'Menu',
           onSelected: (value) async {
+            _analyticsManager.trackButtonClick(value);
             switch (value) {
               case 'download_history':
                 _showDownloadHistory();
@@ -603,6 +618,10 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 });
               case 'notifications':
                 showNotificationsDialog(context, _notificationManager);
+              case 'analytics':
+                showAnalyticsDialog(context, _analyticsManager);
+              case 'announcements':
+                showAnnouncementsDialog(context, _announcementManager, widget.school.id);
               case 'debug_test':
                 _showDebugDialog();
               case 'clear_downloads':
@@ -663,6 +682,26 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   Icon(Icons.cleaning_services, size: 20),
                   SizedBox(width: 12),
                   Text('Clear Cache'),
+                ],
+              ),
+            ),
+            const PopupMenuItem<String>(
+              value: 'announcements',
+              child: Row(
+                children: [
+                  Icon(Icons.campaign, size: 20),
+                  SizedBox(width: 12),
+                  Text('Announcements'),
+                ],
+              ),
+            ),
+            const PopupMenuItem<String>(
+              value: 'analytics',
+              child: Row(
+                children: [
+                  Icon(Icons.analytics, size: 20),
+                  SizedBox(width: 12),
+                  Text('Analytics'),
                 ],
               ),
             ),
