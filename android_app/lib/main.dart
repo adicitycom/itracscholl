@@ -133,7 +133,20 @@ class _WebViewScreenState extends State<WebViewScreen> {
     await _connectivityManager.initialize();
     _isOnline = _connectivityManager.isOnline;
 
+    _biometricAuth = BiometricAuth();
+    await _biometricAuth.initialize();
+
+    _notificationManager = NotificationManager();
+    _notificationManager.onNotificationReceived = _handleNotificationReceived;
+    await _notificationManager.initialize();
+
     print('[App] Managers initialized');
+  }
+
+  void _handleNotificationReceived() {
+    setState(() {
+      _unreadNotifications = _notificationManager.unreadCount;
+    });
   }
 
   void _handleConnectionChange() {
@@ -584,6 +597,12 @@ class _WebViewScreenState extends State<WebViewScreen> {
                     const SnackBar(content: Text('Cache cleared')),
                   );
                 }
+              case 'biometric_settings':
+                showBiometricSettingsDialog(context, _biometricAuth, () {
+                  setState(() {});
+                });
+              case 'notifications':
+                showNotificationsDialog(context, _notificationManager);
               case 'debug_test':
                 _showDebugDialog();
               case 'clear_downloads':
@@ -644,6 +663,39 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   Icon(Icons.cleaning_services, size: 20),
                   SizedBox(width: 12),
                   Text('Clear Cache'),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem<String>(
+              value: 'biometric_settings',
+              child: Row(
+                children: [
+                  Icon(Icons.fingerprint, size: 20),
+                  SizedBox(width: 12),
+                  Text('Biometric'),
+                ],
+              ),
+            ),
+            PopupMenuItem<String>(
+              value: 'notifications',
+              child: Row(
+                children: [
+                  const Icon(Icons.notifications, size: 20),
+                  const SizedBox(width: 12),
+                  const Expanded(child: Text('Notifications')),
+                  if (_unreadNotifications > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        _notificationManager.formattedUnreadCount,
+                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
                 ],
               ),
             ),
