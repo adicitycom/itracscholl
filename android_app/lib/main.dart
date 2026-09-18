@@ -11,6 +11,7 @@ import 'services/download_manager.dart';
 import 'services/cache_manager.dart';
 import 'services/theme_manager.dart';
 import 'services/connectivity_manager.dart';
+import 'dialogs/theme_dialog.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {}
@@ -522,6 +523,33 @@ class _WebViewScreenState extends State<WebViewScreen> {
               WebViewWidget(controller: _controller),
               if (_isLoading)
                 const Center(child: CircularProgressIndicator()),
+              if (_showOfflineIndicator)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    color: Colors.orange,
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.wifi_off, color: Colors.white, size: 20),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Offline Mode - Showing cached content',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        if (_isOnline)
+                          GestureDetector(
+                            onTap: () => setState(() => _showOfflineIndicator = false),
+                            child: const Icon(Icons.close, color: Colors.white, size: 20),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -530,12 +558,27 @@ class _WebViewScreenState extends State<WebViewScreen> {
           tooltip: 'Menu',
           onSelected: (value) async {
             switch (value) {
-              case 'debug_test':
-                _showDebugDialog();
               case 'download_history':
                 _showDownloadHistory();
               case 'session_info':
                 _showSessionInfo();
+              case 'theme_toggle':
+                showThemeDialog(context, widget.themeManager);
+              case 'cache_stats':
+                _cacheManager.getCacheStats().then((stats) {
+                  if (mounted) {
+                    showCacheStatsDialog(context, stats);
+                  }
+                });
+              case 'clear_cache':
+                await _cacheManager.clearAllCache();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Cache cleared')),
+                  );
+                }
+              case 'debug_test':
+                _showDebugDialog();
               case 'clear_downloads':
                 await _downloadManager.clearHistory(schoolId: widget.school.id);
                 if (mounted) {
@@ -563,6 +606,37 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   Icon(Icons.timer, size: 20),
                   SizedBox(width: 12),
                   Text('Session Info'),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem<String>(
+              value: 'theme_toggle',
+              child: Row(
+                children: [
+                  Icon(Icons.palette, size: 20),
+                  SizedBox(width: 12),
+                  Text('Theme'),
+                ],
+              ),
+            ),
+            const PopupMenuItem<String>(
+              value: 'cache_stats',
+              child: Row(
+                children: [
+                  Icon(Icons.storage, size: 20),
+                  SizedBox(width: 12),
+                  Text('Cache Stats'),
+                ],
+              ),
+            ),
+            const PopupMenuItem<String>(
+              value: 'clear_cache',
+              child: Row(
+                children: [
+                  Icon(Icons.cleaning_services, size: 20),
+                  SizedBox(width: 12),
+                  Text('Clear Cache'),
                 ],
               ),
             ),
