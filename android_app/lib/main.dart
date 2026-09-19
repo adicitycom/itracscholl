@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart' hide ThemeMode;
 import 'package:flutter/material.dart' as material show ThemeMode;
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -566,6 +567,71 @@ class _WebViewScreenState extends State<WebViewScreen> {
         ),
       )
       ..loadRequest(Uri.parse(widget.school.websiteUrl));
+
+    // Setup Android WebView permission handler for camera/microphone access
+    if (_controller.platform is AndroidWebViewController) {
+      AndroidWebViewController.api.setOnPlatformPermissionRequest(
+        _controller.platform as AndroidWebViewController,
+        (PlatformWebViewPermissionRequest request) async {
+          print('[WebView] Platform permission request: ${request.types}');
+
+          final grantedTypes = <String>[];
+
+          for (final type in request.types) {
+            print('[WebView] Processing permission type: $type');
+
+            // Handle camera/video permission
+            if (type.contains('video') || type.contains('camera')) {
+              final hasCameraPermission = await CameraPermissionManager.checkCameraPermission();
+              if (!hasCameraPermission) {
+                print('[WebView] Camera permission not granted, requesting...');
+                final status = await CameraPermissionManager.requestCameraPermission();
+                if (status.isGranted) {
+                  grantedTypes.add(type);
+                  print('[WebView] Camera permission granted');
+                } else {
+                  print('[WebView] Camera permission denied: $status');
+                }
+              } else {
+                grantedTypes.add(type);
+                print('[WebView] Camera permission already granted');
+              }
+            }
+            // Handle audio/microphone permission
+            else if (type.contains('audio')) {
+              final hasMicrophonePermission = await CameraPermissionManager.checkMicrophonePermission();
+              if (!hasMicrophonePermission) {
+                print('[WebView] Microphone permission not granted, requesting...');
+                final status = await CameraPermissionManager.requestMicrophonePermission();
+                if (status.isGranted) {
+                  grantedTypes.add(type);
+                  print('[WebView] Microphone permission granted');
+                } else {
+                  print('[WebView] Microphone permission denied: $status');
+                }
+              } else {
+                grantedTypes.add(type);
+                print('[WebView] Microphone permission already granted');
+              }
+            }
+            // Grant other permission types by default
+            else {
+              grantedTypes.add(type);
+              print('[WebView] Other permission type granted: $type');
+            }
+          }
+
+          if (grantedTypes.isNotEmpty) {
+            request.grant(grantedTypes);
+            print('[WebView] Granted permissions: $grantedTypes');
+          } else {
+            request.deny();
+            print('[WebView] All permissions denied');
+          }
+        },
+      );
+      print('[WebView] Android platform permission handler setup complete');
+    }
   }
 
   @override
