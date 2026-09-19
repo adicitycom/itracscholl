@@ -2,6 +2,7 @@ import 'package:flutter/material.dart' hide ThemeMode;
 import 'package:flutter/material.dart' as material show ThemeMode;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -570,18 +571,19 @@ class _WebViewScreenState extends State<WebViewScreen> {
 
     // Setup Android WebView permission handler for camera/microphone access
     if (_controller.platform is AndroidWebViewController) {
-      AndroidWebViewController.api.setOnPlatformPermissionRequest(
-        _controller.platform as AndroidWebViewController,
+      final androidController = _controller.platform as AndroidWebViewController;
+
+      androidController.setOnPlatformPermissionRequest(
         (PlatformWebViewPermissionRequest request) async {
           print('[WebView] Platform permission request: ${request.types}');
 
-          final grantedTypes = <String>[];
+          final grantedTypes = <WebViewPermissionResourceType>[];
 
           for (final type in request.types) {
             print('[WebView] Processing permission type: $type');
 
-            // Handle camera/video permission
-            if (type.contains('video') || type.contains('camera')) {
+            // Handle camera permission
+            if (type == WebViewPermissionResourceType.camera) {
               final hasCameraPermission = await CameraPermissionManager.checkCameraPermission();
               if (!hasCameraPermission) {
                 print('[WebView] Camera permission not granted, requesting...');
@@ -597,8 +599,8 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 print('[WebView] Camera permission already granted');
               }
             }
-            // Handle audio/microphone permission
-            else if (type.contains('audio')) {
+            // Handle microphone permission
+            else if (type == WebViewPermissionResourceType.microphone) {
               final hasMicrophonePermission = await CameraPermissionManager.checkMicrophonePermission();
               if (!hasMicrophonePermission) {
                 print('[WebView] Microphone permission not granted, requesting...');
