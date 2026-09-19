@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ThemeMode;
 import '../services/theme_manager.dart';
 
 void showThemeDialog(BuildContext context, ThemeManager themeManager) {
