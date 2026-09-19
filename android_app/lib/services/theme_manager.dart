@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum ThemeMode {
@@ -53,15 +53,9 @@ class ThemeManager {
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   BuildContext _getDummyContext() {
-    return navigatorKey.currentContext ?? _createDummyContext();
-  }
-
-  BuildContext _createDummyContext() {
-    return MediaQuery(
-      data: const MediaQueryData(),
-      child: Container(),
-    ).createState()?.context ??
-    Container().createElement().getClosestAncestorStateOfType();
+    final context = navigatorKey.currentContext;
+    if (context != null) return context;
+    throw Exception('No navigator context available for theme detection');
   }
 
   ThemeData getLightTheme(Color seedColor) {

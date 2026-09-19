@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ThemeMode;
+import 'package:flutter/material.dart' as material show ThemeMode;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -61,8 +62,8 @@ class _SekolahAppState extends State<SekolahApp> {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: _themeManager.themeNotifier,
       builder: (context, mode, _) {
-        final lightTheme = _themeManager.getLightTheme(Color(widget.school.themeColor));
-        final darkTheme = _themeManager.getDarkTheme(Color(widget.school.themeColor));
+        final lightTheme = _themeManager.getLightTheme(widget.school.themeColor);
+        final darkTheme = _themeManager.getDarkTheme(widget.school.themeColor);
 
         return MaterialApp(
           debugShowCheckedModeBanner: false,
@@ -70,10 +71,10 @@ class _SekolahAppState extends State<SekolahApp> {
           theme: lightTheme,
           darkTheme: darkTheme,
           themeMode: mode == ThemeMode.system
-              ? ThemeMode.system
+              ? material.ThemeMode.system
               : mode == ThemeMode.dark
-                  ? ThemeMode.dark
-                  : ThemeMode.light,
+                  ? material.ThemeMode.dark
+                  : material.ThemeMode.light,
           home: WebViewScreen(
             school: widget.school,
             themeManager: _themeManager,
@@ -537,68 +538,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
               return NavigationDecision.prevent;
             }
             return NavigationDecision.navigate;
-          },
-          onPermissionRequest: (request) async {
-            print('[WebView] Permission request: ${request.types}');
-            for (final type in request.types) {
-              print('[WebView] Handling permission type: $type');
-            }
-
-            final grantedTypes = <String>[];
-            for (final type in request.types) {
-              if (type.contains('video') || type.contains('camera')) {
-                print('[WebView] Processing camera permission request...');
-                final hasCameraPermission = await CameraPermissionManager.checkCameraPermission();
-                if (!hasCameraPermission) {
-                  print('[WebView] Camera permission not granted, requesting...');
-                  final status = await CameraPermissionManager.requestCameraPermission();
-                  if (status.isGranted) {
-                    grantedTypes.add(type);
-                    print('[WebView] Camera permission granted');
-                  } else {
-                    print('[WebView] Camera permission denied: $status');
-                    if (status.isPermanentlyDenied && mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Izin kamera diperlukan untuk absensi wajah. Buka pengaturan untuk mengizinkan.'),
-                          duration: Duration(seconds: 5),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
-                    }
-                  }
-                } else {
-                  grantedTypes.add(type);
-                  print('[WebView] Camera permission already granted');
-                }
-              } else if (type.contains('audio')) {
-                print('[WebView] Processing microphone permission request...');
-                final hasMicrophonePermission = await CameraPermissionManager.checkMicrophonePermission();
-                if (!hasMicrophonePermission) {
-                  print('[WebView] Microphone permission not granted, requesting...');
-                  final status = await CameraPermissionManager.requestMicrophonePermission();
-                  if (status.isGranted) {
-                    grantedTypes.add(type);
-                    print('[WebView] Microphone permission granted');
-                  } else {
-                    print('[WebView] Microphone permission denied: $status');
-                  }
-                } else {
-                  grantedTypes.add(type);
-                  print('[WebView] Microphone permission already granted');
-                }
-              } else {
-                grantedTypes.add(type);
-              }
-            }
-
-            if (grantedTypes.isNotEmpty) {
-              request.grant(grantedTypes);
-              print('[WebView] Granted permissions: $grantedTypes');
-            } else {
-              request.deny();
-              print('[WebView] All permissions denied');
-            }
           },
         ),
       )
