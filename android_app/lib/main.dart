@@ -18,6 +18,7 @@ import 'dialogs/auth_dialog.dart';
 import 'dialogs/notification_dialog.dart';
 import 'services/analytics_manager.dart';
 import 'services/announcement_manager.dart';
+import 'services/camera_permission_manager.dart';
 import 'dialogs/analytics_dialog.dart';
 import 'dialogs/announcement_dialog.dart';
 
@@ -234,12 +235,24 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   Future<void> _requestPermissions() async {
-    await [
+    print('[Permissions] Requesting all permissions...');
+    final results = await [
       Permission.location,
       Permission.locationWhenInUse,
       Permission.camera,
+      Permission.microphone,
       Permission.notification,
     ].request();
+
+    print('[Permissions] Camera permission: ${results[Permission.camera]}');
+    print('[Permissions] Microphone permission: ${results[Permission.microphone]}');
+    print('[Permissions] Location permission: ${results[Permission.location]}');
+    print('[Permissions] Notification permission: ${results[Permission.notification]}');
+
+    if (!results[Permission.camera]!.isGranted) {
+      print('[Permissions] Camera permission not granted on first request, will retry...');
+      await CameraPermissionManager.ensureCameraPermission();
+    }
   }
 
   Future<void> _setupFcm() async {
@@ -524,6 +537,68 @@ class _WebViewScreenState extends State<WebViewScreen> {
               return NavigationDecision.prevent;
             }
             return NavigationDecision.navigate;
+          },
+          onPermissionRequest: (request) async {
+            print('[WebView] Permission request: ${request.types}');
+            for (final type in request.types) {
+              print('[WebView] Handling permission type: $type');
+            }
+
+            final grantedTypes = <String>[];
+            for (final type in request.types) {
+              if (type.contains('video') || type.contains('camera')) {
+                print('[WebView] Processing camera permission request...');
+                final hasCameraPermission = await CameraPermissionManager.checkCameraPermission();
+                if (!hasCameraPermission) {
+                  print('[WebView] Camera permission not granted, requesting...');
+                  final status = await CameraPermissionManager.requestCameraPermission();
+                  if (status.isGranted) {
+                    grantedTypes.add(type);
+                    print('[WebView] Camera permission granted');
+                  } else {
+                    print('[WebView] Camera permission denied: $status');
+                    if (status.isPermanentlyDenied && mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Izin kamera diperlukan untuk absensi wajah. Buka pengaturan untuk mengizinkan.'),
+                          duration: Duration(seconds: 5),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                } else {
+                  grantedTypes.add(type);
+                  print('[WebView] Camera permission already granted');
+                }
+              } else if (type.contains('audio')) {
+                print('[WebView] Processing microphone permission request...');
+                final hasMicrophonePermission = await CameraPermissionManager.checkMicrophonePermission();
+                if (!hasMicrophonePermission) {
+                  print('[WebView] Microphone permission not granted, requesting...');
+                  final status = await CameraPermissionManager.requestMicrophonePermission();
+                  if (status.isGranted) {
+                    grantedTypes.add(type);
+                    print('[WebView] Microphone permission granted');
+                  } else {
+                    print('[WebView] Microphone permission denied: $status');
+                  }
+                } else {
+                  grantedTypes.add(type);
+                  print('[WebView] Microphone permission already granted');
+                }
+              } else {
+                grantedTypes.add(type);
+              }
+            }
+
+            if (grantedTypes.isNotEmpty) {
+              request.grant(grantedTypes);
+              print('[WebView] Granted permissions: $grantedTypes');
+            } else {
+              request.deny();
+              print('[WebView] All permissions denied');
+            }
           },
         ),
       )
