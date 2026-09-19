@@ -623,10 +623,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
             }
           }
 
+          // Grant or deny based on approved permissions
           if (grantedTypes.isNotEmpty) {
-            request.grant(grantedTypes);
-            print('[WebView] Granted permissions: $grantedTypes');
+            print('[WebView] Granting ${grantedTypes.length} permission(s)');
+            // grant() method in webview_flutter takes no parameters
+            // It grants all requested permissions that were approved
+            request.grant();
+            print('[WebView] Permissions granted');
           } else {
+            print('[WebView] Denying all requested permissions');
             request.deny();
             print('[WebView] All permissions denied');
           }
