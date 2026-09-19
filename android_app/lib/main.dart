@@ -250,9 +250,17 @@ class _WebViewScreenState extends State<WebViewScreen> {
     print('[Permissions] Location permission: ${results[Permission.location]}');
     print('[Permissions] Notification permission: ${results[Permission.notification]}');
 
+    // If camera permission not granted, ensure it's requested
     if (!results[Permission.camera]!.isGranted) {
-      print('[Permissions] Camera permission not granted on first request, will retry...');
-      await CameraPermissionManager.ensureCameraPermission();
+      print('[Permissions] Camera permission not granted, checking status...');
+      final cameraStatus = await Permission.camera.status;
+      if (cameraStatus.isDenied) {
+        print('[Permissions] Camera permission denied, will retry on demand...');
+      } else if (cameraStatus.isPermanentlyDenied) {
+        print('[Permissions] Camera permission permanently denied');
+      }
+    } else {
+      print('[Permissions] Camera permission already granted');
     }
   }
 
@@ -362,6 +370,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
   // 2. form submit - terutama target="_blank"
   // 3. link klik - download/cetak
   // 4. DateTime picker
+  // 5. Camera access optimization
   static const String _injectedJs = r"""
 (function() {
   try {
@@ -369,6 +378,16 @@ class _WebViewScreenState extends State<WebViewScreen> {
     console.log('[Sekolah App JS] URL:', window.location.href);
     console.log('[Sekolah App JS] FlutterExternalUrl available:', typeof FlutterExternalUrl !== 'undefined');
     console.log('[Sekolah App JS] FlutterDateTimePicker available:', typeof FlutterDateTimePicker !== 'undefined');
+
+    // Optimize camera access - reduce permission dialogs
+    var _origGetUserMedia = navigator.mediaDevices.getUserMedia;
+    navigator.mediaDevices.getUserMedia = function(constraints) {
+      console.log('[Camera] getUserMedia called with:', constraints);
+      return _origGetUserMedia.call(navigator.mediaDevices, constraints).catch(function(error) {
+        console.error('[Camera] getUserMedia error:', error.message);
+        throw error;
+      });
+    };
 
     // 1. Intercept window.open() -- dipakai banyak tombol cetak/PDF
     var _origOpen = window.open;
@@ -516,11 +535,16 @@ class _WebViewScreenState extends State<WebViewScreen> {
             print('[WebView] Page started loading');
             setState(() => _isLoading = true);
           },
-          onPageFinished: (url) {
+          onPageFinished: (url) async {
             print('[WebView] ===== PAGE FINISHED =====');
             print('[WebView] URL: $url');
             _sessionManager.recordActivity();
             _analyticsManager.trackPageView(url ?? 'unknown');
+
+            // Check camera permission status when page loads
+            final hasCameraPermission = await CameraPermissionManager.checkCameraPermission();
+            print('[WebView] Camera permission status: $hasCameraPermission');
+
             setState(() => _isLoading = false);
             print('[WebView] Running JS injection...');
             _controller.runJavaScript(_injectedJs).then((_) {
@@ -601,215 +625,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
             ],
           ),
         ),
-        floatingActionButton: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert),
-          tooltip: 'Menu',
-          onSelected: (value) async {
-            _analyticsManager.trackButtonClick(value);
-            switch (value) {
-              case 'download_history':
-                _showDownloadHistory();
-              case 'session_info':
-                _showSessionInfo();
-              case 'theme_toggle':
-                showThemeDialog(context, widget.themeManager);
-              case 'cache_stats':
-                _cacheManager.getCacheStats().then((stats) {
-                  if (mounted) {
-                    showCacheStatsDialog(context, stats);
-                  }
-                });
-              case 'clear_cache':
-                await _cacheManager.clearAllCache();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Cache cleared')),
-                  );
-                }
-              case 'biometric_settings':
-                showBiometricSettingsDialog(context, _biometricAuth, () {
-                  setState(() {});
-                });
-              case 'notifications':
-                showNotificationsDialog(context, _notificationManager);
-              case 'analytics':
-                showAnalyticsDialog(context, _analyticsManager);
-              case 'announcements':
-                showAnnouncementsDialog(context, _announcementManager, widget.school.id);
-              case 'debug_test':
-                _showDebugDialog();
-              case 'clear_downloads':
-                await _downloadManager.clearHistory(schoolId: widget.school.id);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Download history cleared')),
-                  );
-                }
-            }
-          },
-          itemBuilder: (BuildContext context) => [
-            const PopupMenuItem<String>(
-              value: 'download_history',
-              child: Row(
-                children: [
-                  Icon(Icons.history, size: 20),
-                  SizedBox(width: 12),
-                  Text('Download History'),
-                ],
-              ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'session_info',
-              child: Row(
-                children: [
-                  Icon(Icons.timer, size: 20),
-                  SizedBox(width: 12),
-                  Text('Session Info'),
-                ],
-              ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem<String>(
-              value: 'theme_toggle',
-              child: Row(
-                children: [
-                  Icon(Icons.palette, size: 20),
-                  SizedBox(width: 12),
-                  Text('Theme'),
-                ],
-              ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'cache_stats',
-              child: Row(
-                children: [
-                  Icon(Icons.storage, size: 20),
-                  SizedBox(width: 12),
-                  Text('Cache Stats'),
-                ],
-              ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'clear_cache',
-              child: Row(
-                children: [
-                  Icon(Icons.cleaning_services, size: 20),
-                  SizedBox(width: 12),
-                  Text('Clear Cache'),
-                ],
-              ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'announcements',
-              child: Row(
-                children: [
-                  Icon(Icons.campaign, size: 20),
-                  SizedBox(width: 12),
-                  Text('Announcements'),
-                ],
-              ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'analytics',
-              child: Row(
-                children: [
-                  Icon(Icons.analytics, size: 20),
-                  SizedBox(width: 12),
-                  Text('Analytics'),
-                ],
-              ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem<String>(
-              value: 'biometric_settings',
-              child: Row(
-                children: [
-                  Icon(Icons.fingerprint, size: 20),
-                  SizedBox(width: 12),
-                  Text('Biometric'),
-                ],
-              ),
-            ),
-            PopupMenuItem<String>(
-              value: 'notifications',
-              child: Row(
-                children: [
-                  const Icon(Icons.notifications, size: 20),
-                  const SizedBox(width: 12),
-                  const Expanded(child: Text('Notifications')),
-                  if (_unreadNotifications > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        _notificationManager.formattedUnreadCount,
-                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem<String>(
-              value: 'debug_test',
-              child: Row(
-                children: [
-                  Icon(Icons.bug_report, size: 20),
-                  SizedBox(width: 12),
-                  Text('Test URL Launcher'),
-                ],
-              ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'clear_downloads',
-              child: Row(
-                children: [
-                  Icon(Icons.delete_outline, size: 20),
-                  SizedBox(width: 12),
-                  Text('Clear History'),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showDebugDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Test URL Launcher'),
-        content: TextField(
-          onChanged: (val) => _testUrl = val,
-          decoration: const InputDecoration(
-            hintText: 'Paste PDF URL here',
-            helperText: 'Example: https://example.com/file.pdf',
-            border: OutlineInputBorder(),
-          ),
-          minLines: 3,
-          maxLines: 5,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              if (_testUrl.isNotEmpty) {
-                print('[DEBUG] Testing URL: $_testUrl');
-                _openExternal(_testUrl);
-              }
-            },
-            child: const Text('Test'),
-          ),
-        ],
       ),
     );
   }
